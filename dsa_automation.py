@@ -96,22 +96,6 @@ def emr_config(fname):
         return yaml.load(f)
 
 def emr_newcluster(btn):
-    # this does not support multi-cluster due to singleton pattern
-    import boto3
-    global emr, ec2
-    config = emr_config('aws-emr-config.yml')
-    secrets = emr_config('aws-emr-secrets.yml') # git-ignored
-    emr = boto3.client('emr',
-        region_name=config['region'],
-        aws_access_key_id=secrets['access_id'],
-        aws_secret_access_key=secrets['access_key']
-    )
-    ec2 = boto3.client('ec2',
-        region_name=config['region'],
-        aws_access_key_id=secrets['access_id'],
-        aws_secret_access_key=secrets['access_key']
-    )
-
     import getpass, os, json, time, datetime
     ctx = dict() # context variables that will be persisted in a local database
     ctx.update(config)
@@ -304,6 +288,22 @@ def ui_emr(init=True):
             v text
         );""")
         display(HBox([btnNew, btnRefresh]))
+
+        # this does not support multi-cluster due to singleton pattern
+        import boto3
+        global emr, ec2
+        config = emr_config('aws-emr-config.yml')
+        secrets = emr_config('aws-emr-secrets.yml') # git-ignored
+        emr = boto3.client('emr',
+            region_name=config['region'],
+            aws_access_key_id=secrets['access_id'],
+            aws_secret_access_key=secrets['access_key']
+        )
+        ec2 = boto3.client('ec2',
+            region_name=config['region'],
+            aws_access_key_id=secrets['access_id'],
+            aws_secret_access_key=secrets['access_key']
+        )
     import pandas as pd
     clusters = pd.DataFrame(localdb.execute("SELECT cluster_id, ts, state FROM my_clusters;").fetchall(),
         columns=['cluster_id', 'time', 'state'])
