@@ -369,13 +369,13 @@ def ui_emr_services(cluster_id=None):
         (master_name, ) = ret
         return HTML("""
         <blockquote>Log into your dedicated Jupyter from AWS EMR Cluster with <strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
-        <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/">Jupyter Notebook</a>
+        <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
         <hr/>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/">YARN</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/">HDFS</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/">Spark History</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/">Hue</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/">HBase</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/" target="_blank">YARN</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/" target="_blank">HDFS</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/" target="_blank">Spark History</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/" target="_blank">Hue</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/" target="_blank">HBase</a>
         """.format(master_name=master_name))
     else:
         return HTML('Cluster not found.')
