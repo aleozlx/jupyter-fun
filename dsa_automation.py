@@ -368,14 +368,14 @@ def ui_emr_services(cluster_id=None):
     if ret:
         (master_name, ) = ret
         return HTML("""
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:9443/">[Jupyter Notebook]</a>
-        <p><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</p>
+        <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/">Jupyter Notebook]</a>
+        <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
         <hr/>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/">[YARN]</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/">[HDFS]</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/">[Spark History]</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/">[Hue]</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/">[HBase]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/">YARN</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/">HDFS</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/">Spark History</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/">Hue</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/">HBase</a>
         """.format(master_name=master_name))
     else:
         return HTML('Cluster not found.')
