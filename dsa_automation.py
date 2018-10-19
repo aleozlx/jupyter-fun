@@ -368,7 +368,8 @@ def ui_emr_services(cluster_id=None):
     if ret:
         (master_name, ) = ret
         return HTML("""
-        <blockquote>Log into your dedicated Jupyter from AWS EMR Cluster with <strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
+        <h2>Log into your dedicated Jupyter from AWS EMR Cluster</h2>
+        <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
         <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
         <hr/>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/" target="_blank">YARN</a>
