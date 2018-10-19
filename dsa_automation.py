@@ -2,6 +2,7 @@ import os, sys, subprocess, uuid
 import datetime
 import sqlite3
 import requests
+import threading
 from ipywidgets import Button, HBox, IntProgress
 import IPython.display
 from IPython.display import Javascript, HTML, display, clear_output
@@ -95,6 +96,14 @@ def get_emr_config(fname):
     with open(fname, 'r') as f:
         return yaml.load(f)
 
+def try_commitdb(retries = 5):
+    for i in range(retries):
+        try: # Sqlite vs NFS
+            localdb.commit()
+            break
+        except: # OperationalError disk I/O error
+            time.sleep(1)
+
 def emr_newcluster(btn):
     import getpass, os, json, time, datetime
     ctx = dict() # context variables that will be persisted in a local database
@@ -162,127 +171,124 @@ def emr_newcluster(btn):
     cluster_id = response['JobFlowId']
     localdb.execute('INSERT INTO my_clusters VALUES (?, "unknown", ?);',
         (cluster_id, datetime.datetime.now()))
-    try:
-        localdb.commit()
-    except:
-        pass
-
-    response = emr.describe_cluster(
-        ClusterId=cluster_id
-    )
-    while True:
-        response = emr.describe_cluster(ClusterId=cluster_id)
-        try:
-            response['Cluster']['MasterPublicDnsName'].find("ec2")
-            print('...Cluster DNS Active',end="")
-            break
-        except:
-            time.sleep(5)
-            print(".", end="")
-            pass
-    print("\n\nProceeding with Firewall Rules...")
-    #Get Cluster Security Group Info
-    master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
-    slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
-
-    ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
     for k, v in ctx.items():
         localdb.execute('INSERT INTO my_clusters_facts VALUES (?, ?, ?);', (cluster_id, k, v))
+    try_commitdb()
 
-    def add_security_group(group_id, name, port):
-        try:
-            data = ec2.authorize_security_group_ingress(
-                GroupId=group_id,
-                IpPermissions=[
-                    {'IpProtocol': 'tcp',
-                    'FromPort': port,
-                    'ToPort': port,
-                    'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-                ])
-            print("Ingress {} added".format(name))
-        except:
-            print("Ingress {} already added".format(name))
+    print("Provisioning a new EMR cluster from AWS. Please do not refresh until it is done.")
 
-    firewall_allow_list = [
-        (master_security_group, 'SSH', 22),
-        (master_security_group, 'YARN', 8088),
-        (master_security_group, 'HDFS NameNode', 50070),
-        (master_security_group, 'Spark History Server', 18080),
-        (master_security_group, 'Hue', 8888),
-        (master_security_group, 'HBase', 16010),
-        (master_security_group, 'Jupyter Notebook', 9090),
-        (master_security_group, 'Hue', 8888),
-        (slave_security_group, 'Slave SSH', 22),
-        (slave_security_group, 'Slave YARN NodeManager', 8042),
-        (slave_security_group, 'Slave HDFS DataNode', 50075),
+    def background_emr_provision():
+        while 1:
+            response = emr.describe_cluster(ClusterId=cluster_id)
+            try:
+                response['Cluster']['MasterPublicDnsName'].find("ec2")
+                print('...Cluster DNS Active',end="")
+                break
+            except:
+                time.sleep(5)
+                print(".", end="")
+                pass
+        print("\n\nProceeding with Firewall Rules...")
+        #Get Cluster Security Group Info
+        master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
+        slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
+
+        ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
+        localdb.execute('INSERT INTO my_clusters_facts VALUES (?, "master_name", ?);', (cluster_id, ctx['master_name']))
+        try_commitdb()
+
+        def add_security_group(group_id, name, port):
+            try:
+                data = ec2.authorize_security_group_ingress(
+                    GroupId=group_id,
+                    IpPermissions=[
+                        {'IpProtocol': 'tcp',
+                        'FromPort': port,
+                        'ToPort': port,
+                        'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+                    ])
+                print("Ingress {} added".format(name))
+            except:
+                print("Ingress {} already added".format(name))
+
+        firewall_allow_list = [
+            (master_security_group, 'SSH', 22),
+            (master_security_group, 'YARN', 8088),
+            (master_security_group, 'HDFS NameNode', 50070),
+            (master_security_group, 'Spark History Server', 18080),
+            (master_security_group, 'Hue', 8888),
+            (master_security_group, 'HBase', 16010),
+            (master_security_group, 'Jupyter Notebook', 9090),
+            (master_security_group, 'Hue', 8888),
+            (slave_security_group, 'Slave SSH', 22),
+            (slave_security_group, 'Slave YARN NodeManager', 8042),
+            (slave_security_group, 'Slave HDFS DataNode', 50075),
+        ]
+        for rule in firewall_allow_list:
+            add_security_group(*rule)
+
+        print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
+
+        while str(response['Cluster']['Status']['State']) == 'STARTING':
+                time.sleep(5)
+                print(".", end="")
+                response = emr.describe_cluster(
+                    ClusterId=cluster_id
+                )
+        print('...Done',end="")
+
+        print ("\n\nRunning Bootstrap Actions.\nThis will take a few minutes...\n\n***Please Wait***\n\nBootstrapping.",end="")
+
+        while str(response['Cluster']['Status']['State']) == 'BOOTSTRAPPING':
+                time.sleep(5)
+                print(".", end="")
+                response = emr.describe_cluster(
+                    ClusterId=cluster_id
+                )
+        print('...Done',end="")
+        # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
+
+        #Refresh Cluster Description
+        response = emr.describe_cluster(
+            ClusterId=cluster_id
+        )
+
+        #Bootstrap Cluster with Fabric
+        from fabric import tasks
+        from fabric.api import run
+        from fabric.api import env
+        from fabric.api import hide
+        from fabric.network import disconnect_all
+
+        env.host_string = ctx['master_name']
+        env.user = 'hadoop'
+        env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
+        env.warn_only
+        os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
+            load_notebook_location=emr_config['load_notebook_location'], **ctx))
         
-    ]
-
-    print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
-
-    while str(response['Cluster']['Status']['State']) == 'STARTING':
-            time.sleep(5)
-            print(".", end="")
-            response = emr.describe_cluster(
-                ClusterId=cluster_id
-            )
-    print('...Done',end="")
-
-    print ("\n\nRunning Bootstrap Actions.\nThis will take a few minutes...\n\n***Please Wait***\n\nBootstrapping.",end="")
-
-    while str(response['Cluster']['Status']['State']) == 'BOOTSTRAPPING':
-            time.sleep(5)
-            print(".", end="")
-            response = emr.describe_cluster(
-                ClusterId=cluster_id
-            )
-    print('...Done',end="")
-    # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
-
-    #Refresh Cluster Description
-    response = emr.describe_cluster(
-        ClusterId=cluster_id
-    )
-
-    #Bootstrap Cluster with Fabric
-    from fabric import tasks
-    from fabric.api import run
-    from fabric.api import env
-    from fabric.api import hide
-    from fabric.network import disconnect_all
-
-    env.host_string = ctx['master_name']
-    env.user = 'hadoop'
-    env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
-    env.warn_only
-    os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
-        load_notebook_location=emr_config['load_notebook_location'], **ctx))
-    
-    print('Everything is ready!')
-    for i in range(5):
-        try: # Sqlite vs NFS
-            localdb.commit()
-            break
-        except: # OperationalError disk I/O error
-            time.sleep(1)
+        print('Everything is ready!')
+    t_background_emr_provision = threading.Thread(target=background_emr_provision)
+    t_background_emr_provision.start()
 
 def emr_onrefresh(btn):
     while 1:
-        ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state='unknown' or state='ready';").fetchone()
+        ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated';").fetchone()
         if ret:
             (cluster_id, ) = ret
         else: break
         res = emr.describe_cluster(ClusterId=cluster_id)
         if res['Cluster']['Status']['State'] == 'WAITING':
             localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('ready', cluster_id))
-        elif res['Cluster']['Status']['State'] == 'TERMINATED':
-            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('terminated', cluster_id))
-    localdb.commit()
+        else:
+            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", (res['Cluster']['Status']['State'].lower(), cluster_id))
+        time.sleep(0.3)
+    try_commitdb()
     clear_output()
     ui_emr(False)
 
 def emr_onterminate(btn):
-    ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state='unknown' or state='ready';").fetchone()
+    ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated' and state!='terminating';").fetchone()
     if ret:
         (cluster_id, ) = ret
     else: return
