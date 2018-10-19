@@ -316,13 +316,13 @@ def ui_emr(init=True):
         emr_config.update(get_emr_config('aws-emr-secrets.yml')) # git-ignored sensitive info
         emr = boto3.client('emr',
             region_name=emr_config['region'],
-            aws_access_key_id=secrets['access_id'],
-            aws_secret_access_key=secrets['access_key']
+            aws_access_key_id=emr_config['access_id'],
+            aws_secret_access_key=emr_config['access_key']
         )
         ec2 = boto3.client('ec2',
             region_name=emr_config['region'],
-            aws_access_key_id=secrets['access_id'],
-            aws_secret_access_key=secrets['access_key']
+            aws_access_key_id=emr_config['access_id'],
+            aws_secret_access_key=emr_config['access_key']
         )
     import pandas as pd
     clusters = pd.DataFrame(localdb.execute("SELECT cluster_id, ts, state FROM my_clusters;").fetchall(),
