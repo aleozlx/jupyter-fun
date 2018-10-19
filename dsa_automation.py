@@ -268,7 +268,7 @@ def emr_newcluster(btn):
         )
 
         # volume metadata: ec2.Volume(id)
-        progress.description = 'Mounting persistent storage...'
+        progress.description = 'Mounting EBS...'
         master_instance = [i for i in emr.list_instances(ClusterId=cluster_id)['Instances'] if i['PublicDnsName']==ctx['master_name']][0]
         ec2.attach_volume(InstanceId=master_instance['Ec2InstanceId'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/xvdz')
         
@@ -288,9 +288,14 @@ def emr_newcluster(btn):
 
         with hide('output'):
             run('sudo docker restart jupyterhub')
+            run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
+            run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
+            run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger\'')
+            run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
             run('sudo docker exec jupyterhub mount /dev/xvdz /mnt')
         
         progress.value = 100
+        progress.description = 'Done.'
         print('Everything is ready!')
         
     t_background_emr_provision = threading.Thread(target=background_emr_provision)
