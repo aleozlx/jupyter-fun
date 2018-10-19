@@ -1,0 +1,434 @@
+import os, sys, subprocess, uuid
+import datetime
+import sqlite3
+import requests
+from ipywidgets import Button, HBox
+import IPython.display
+from IPython.display import Javascript, HTML, display, clear_output
+
+scary_template = 'IPython.notebook.kernel.execute("{}");'
+localdb = sqlite3.connect('local.db')
+
+def scary(code):
+    return Javascript(scary_template.format(code))
+
+def scarier(code):
+    return Javascript(scary_template.replace('"', "`").format(code))
+
+display(scarier("__notebook_path='${IPython.notebook.notebook_path}'; scary_stuff.notebook_path=__notebook_path"))
+
+def inside_docker():
+    docker_flag = os.system("grep -q docker /proc/1/cgroup")==0
+    return docker_flag
+
+def nbid():
+    subprocess.Popen(
+        ['/dsa/data/scripts/nbid', notebook_path],
+        stdout=subprocess.PIPE
+    ).stdout.read().decode('ascii')
+
+def aml_list(path, excludes = ['.ipynb_checkpoints', '__pycache__', 'local.db'], exclude_exts = ['.ipynb', '.tgz']):
+    return [fname for fname in set(os.listdir(path)) - set(excludes) if os.path.splitext(fname)[1] not in exclude_exts]
+
+def aml_archive(fnames):
+    track_id = uuid.uuid1()
+    os.system('tar cvzf {}.tgz {}'.format(track_id, '\x20'.join(fnames)))
+    return track_id
+
+def aml_submit():
+    nbid()
+    files = aml_list('.')
+    track_id = aml_archive(files)
+    fname_sub = '{}.tgz'.format(track_id)
+    res = requests.post('http://128.206.117.147:5000/sub/{}'.format(track_id),
+        files= {'file': (fname_sub, open(fname_sub, 'rb'))}, timeout=5).json()
+    return track_id, files, res
+
+def aml_onsubmit(btn=None):
+    track_id, files, res = aml_submit()
+    # print(res)
+    localdb.execute('INSERT INTO my_submissions VALUES (?, ?, "unknown", ?);',
+        (str(track_id), str(files), datetime.datetime.now()))
+    localdb.commit()
+    aml_onrefresh()
+
+def aml_onrefresh(btn=None):
+    ret = localdb.execute("SELECT track_id FROM my_submissions WHERE state='unknown';").fetchone()
+    if ret:
+        (track_id, ) = ret
+    else: return
+    res = requests.get('http://128.206.117.147:5000/r/{}'.format(track_id), timeout=5).json()
+    if res['status'] in {'ok', 'err'}:
+        localdb.execute("UPDATE my_submissions SET state=?;", (res['status'], ))
+        localdb.commit()
+        clear_output()
+        ui_amljob(False)
+        if res['status']=='ok':
+            os.system('wget http://128.206.117.147:5000/f/{} -O {}'.format(track_id, res['data']))
+
+def ui_amljob(init=True):
+    if init:
+        btnSubmit = Button(description='New submission', button_style='info')
+        btnSubmit.on_click(aml_onsubmit)
+        btnRefresh = Button(description='Refresh', button_style='info')
+        btnRefresh.on_click(aml_onrefresh)
+        localdb.execute("""CREATE TABLE IF NOT EXISTS my_submissions (
+            track_id text,
+            files text,
+            state text,
+            ts timestamp
+        );""")
+        display(HBox([btnSubmit, btnRefresh]))
+    import pandas as pd
+    submissions = pd.DataFrame(localdb.execute("SELECT track_id, ts, state FROM my_submissions;").fetchall(),
+        columns=['id', 'time', 'state'])
+    display(HTML(submissions.to_html()))
+
+# EMR things stole from Matt and sugar-coated
+
+def emr_config(fname):
+    import yaml
+    with open(fname, 'r') as f:
+        return yaml.load(f)
+
+def emr_newcluster(btn):
+    # this does not support multi-cluster due to singleton pattern
+    import boto3
+    global emr, ec2
+    config = emr_config('aws-emr-config.yml')
+    secrets = emr_config('aws-emr-secrets.yml') # git-ignored
+    emr = boto3.client(
+        'emr',
+        region_name=config['region'],
+        aws_access_key_id=secrets['access_id'],
+        aws_secret_access_key=secrets['access_key']
+    )
+    ec2 = boto3.client(
+        'ec2',
+        region_name=config['region'],
+        aws_access_key_id=secrets['access_id'],
+        aws_secret_access_key=secrets['access_key']
+    )
+
+    import getpass, os, json, time, datetime
+    ctx = dict() # context variables that will be persisted in a local database
+    ctx.update(config)
+    ctx['system_user_name'] = getpass.getuser()
+    ctx['wk_dir'] = os.getcwd()
+
+    # Create SSH Keypair
+    ctx['emr_pem_file'] = time.strftime('EMR-%d%m%Y%H%M%S-{system_user_name}'.format(**ctx))
+    global emr_key
+    emr_key = ec2.create_key_pair(KeyName=ctx['emr_pem_file'])
+    ctx['emr_key']=json.dumps(emr_key)
+    ctx['emr_key/KeyMaterial'] = emr_key['KeyMaterial']
+    os.system('echo "{emr_key/KeyMaterial}" > {emr_pem_file}.pem'.format(**ctx))
+    os.chmod('{wk_dir}/{emr_pem_file}.pem'.format(**ctx), 0o400)
+
+    # Launch EMR Cluster
+    response = emr.run_job_flow(
+        Name='EMR Jupyter NB-{system_user_name}'.format(**ctx),
+        LogUri='s3n://logs-{system_user_name}/elasticmapreduce/'.format(**ctx),
+        ReleaseLabel='emr-5.17.0',
+        Instances={
+            'InstanceGroups': [
+                {
+                    'Name':'Master - 1',
+                    'InstanceRole':'MASTER',
+                    'InstanceType':config['instance_size'],
+                    'InstanceCount':config['master_instances'],
+                },
+                {
+                    'Name':'Core - 2',
+                    'InstanceRole':'CORE',
+                    'InstanceType':config['instance_size'],
+                    'InstanceCount':config['master_instances'],
+                },
+            ],
+            'KeepJobFlowAliveWhenNoSteps': True,
+            'Ec2KeyName': ctx['emr_pem_file'],
+            'Placement': {
+                'AvailabilityZone': 'us-west-2c'
+            }
+        },
+
+        AutoScalingRole="EMR_AutoScaling_DefaultRole",
+        Applications=[
+           {
+               'Name': 'Hadoop'
+           },
+           {
+               'Name': 'Hive'
+           },
+           {
+               'Name': 'Spark'
+           },
+           {
+               'Name': 'Pig'
+           },
+           {
+               'Name': 'JupyterHub'
+           }
+        ],
+        Configurations=[
+            {
+           'Classification': 'spark',
+           'Configurations': [],
+           'Properties': {
+               'maximizeResourceAllocation':'true'
+           }
+           },
+        ],
+        VisibleToAllUsers=False,
+        EbsRootVolumeSize=10,
+        JobFlowRole='EMR_EC2_DefaultRole',
+        ServiceRole='EMR_DefaultRole',
+    ) #End of Cluster Launch Command
+
+    cluster_id = response['JobFlowId']
+    localdb.execute('INSERT INTO my_clusters VALUES (?, "unknown", ?);',
+        (cluster_id, datetime.datetime.now()))
+    localdb.commit()
+
+    response = emr.describe_cluster(
+        ClusterId=cluster_id
+    )
+    while True:
+        response = emr.describe_cluster(ClusterId=cluster_id)
+        try:
+            response['Cluster']['MasterPublicDnsName'].find("ec2")
+            print('...Cluster DNS Active',end="")
+            break
+        except:
+            time.sleep(5)
+            print(".", end="")
+            pass
+    print("\n\nProceeding with Firewall Rules...")
+    #Get Cluster Security Group Info
+    master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
+    slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
+
+    ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
+
+    #Create Firewall Exceptions
+    try:
+        sec_rule="SSH"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 22,
+                 'ToPort': 22,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="YARN"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 8088,
+                 'ToPort': 8088,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="HDFS NameNode"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 50070,
+                 'ToPort': 50070,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Spark History Server"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 18080,
+                 'ToPort': 18080,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Hue"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 8888,
+                 'ToPort': 8888,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="HBase"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 16010,
+                 'ToPort': 16010,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Jupyter Notebook"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=master_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 9090,
+                 'ToPort': 9090,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Slave SSH"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=slave_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 22,
+                 'ToPort': 22,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Slave YARN NodeManager"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=slave_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 8042,
+                 'ToPort': 8042,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    try:
+        sec_rule="Slave HDFS DataNode"
+        data = ec2.authorize_security_group_ingress(
+            GroupId=slave_security_group,
+            IpPermissions=[
+                {'IpProtocol': 'tcp',
+                 'FromPort': 50075,
+                 'ToPort': 50075,
+                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+            ])
+        print("Ingress "+sec_rule+" added")
+    except:
+        print(sec_rule+" already added")
+
+    print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
+
+    while str(response['Cluster']['Status']['State']) == 'STARTING':
+            time.sleep(5)
+            print(".", end="")
+            response = emr.describe_cluster(
+                ClusterId=cluster_id
+            )
+    print('...Done',end="")
+
+    print ("\n\nRunning Bootstrap Actions.\nThis will take a few minutes...\n\n***Please Wait***\n\nBootstrapping.",end="")
+
+    while str(response['Cluster']['Status']['State']) == 'BOOTSTRAPPING':
+            time.sleep(5)
+            print(".", end="")
+            response = emr.describe_cluster(
+                ClusterId=cluster_id
+            )
+    print('...Done',end="")
+    print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
+
+    #Refresh Cluster Description
+    response = emr.describe_cluster(
+        ClusterId=cluster_id
+    )
+
+    #Bootstrap Cluster with Fabric
+    from fabric import tasks
+    from fabric.api import run
+    from fabric.api import env
+    from fabric.api import hide
+    from fabric.network import disconnect_all
+
+    env.host_string = ctx['master_name']
+    env.user = 'hadoop'
+    env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
+    env.warn_only
+
+    def install_jupyter():
+        with hide('output'):
+            run('sudo -u root pip-3.4 install jupyter')
+            run('sudo -u root pip-3.4 install toree')
+            run('sudo -u root /usr/local/bin/jupyter toree install --spark_home=/usr/lib/spark/ --interpreters=Scala,PySpark,SparkR,SQL')
+            run('mkdir -p /home/hadoop/.jupyter/')
+            run('curl -o /home/hadoop/.jupyter/jupyter_notebook_config.py https://s3-us-west-2.amazonaws.com/dsa-mizzou/scripts/jupyter_notebook_config.py')
+            run('sudo -u root yum -y install tmux')
+            run('tmux new-session -d "jupyter notebook --no-browser --config /home/hadoop/.jupyter/jupyter_notebook_config.py"')
+
+    os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan')
+
+    print('Everything is ready!')
+
+
+
+
+
+
+
+def ui_emr(init=True):
+    if init:
+        btnNew = Button(description='New EMR Cluster', button_style='info')
+        btnNew.on_click(emr_newcluster)
+        btnRefresh = Button(description='Refresh', button_style='info')
+        #btnRefresh.on_click(aml_onrefresh)
+        localdb.execute("""CREATE TABLE IF NOT EXISTS my_clusters (
+            cluster_id text,
+            state text,
+            ts timestamp
+        );""")
+        localdb.execute("""CREATE TABLE IF NOT EXISTS my_clusters_facts (
+            cluster_id test,
+            k text,
+            v text
+        );""")
+        display(HBox([btnNew, btnRefresh]))
+    import pandas as pd
+    clusters = pd.DataFrame(localdb.execute("SELECT cluster_id, ts, state FROM my_clusters;").fetchall(),
+        columns=['cluster_id', 'time', 'state'])
+    display(HTML(clusters.to_html()))
+
+
