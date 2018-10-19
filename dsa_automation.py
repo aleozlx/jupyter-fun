@@ -286,7 +286,7 @@ def emr_newcluster(btn):
         env.warn_only
         # os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
         #     load_notebook_location=emr_config['load_notebook_location'], **ctx))
-
+        # just in case https://jpetazzo.github.io/2015/01/13/docker-mount-dynamic-volumes/
         with hide('output'):
             run('sudo docker restart jupyterhub')
             run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
