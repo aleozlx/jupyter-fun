@@ -110,6 +110,9 @@ def emr_newcluster(btn):
     # ctx.update(emr_config)
     ctx['system_user_name'] = getpass.getuser()
     ctx['wk_dir'] = os.getcwd()
+    progress = IntProgress(description='New EMR cluster', min=0, max=100)
+    display(progress)
+    progress.value = 5
 
     # Create SSH Keypair
     ctx['emr_pem_file'] = time.strftime('EMR-%d%m%Y%H%M%S-{system_user_name}'.format(**ctx))
@@ -117,6 +120,7 @@ def emr_newcluster(btn):
     ctx['emr_key']=json.dumps(emr_key)
     os.system('echo "{KeyMaterial}" > {emr_pem_file}.pem'.format(KeyMaterial=emr_key['KeyMaterial'], **ctx))
     os.chmod('{wk_dir}/{emr_pem_file}.pem'.format(**ctx), 0o400)
+    progress.value = 7
 
     # Launch EMR Cluster
     response = emr.run_job_flow(
@@ -167,6 +171,7 @@ def emr_newcluster(btn):
         JobFlowRole='EMR_EC2_DefaultRole',
         ServiceRole='EMR_DefaultRole',
     ) #End of Cluster Launch Command
+    progress.value = 10
 
     cluster_id = response['JobFlowId']
     localdb.execute('INSERT INTO my_clusters VALUES (?, "unknown", ?);',
@@ -183,9 +188,10 @@ def emr_newcluster(btn):
             print('...Cluster DNS Active',end="")
             break
         except:
-            time.sleep(5)
+            time.sleep(10)
             print(".", end="")
             pass
+    progress.value = 15
     
     ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
     localdb.execute('INSERT INTO my_clusters_facts VALUES (?, "master_name", ?);', (cluster_id, ctx['master_name']))
@@ -194,6 +200,7 @@ def emr_newcluster(btn):
     def background_emr_provision():
         print("\n\nProceeding with Firewall Rules...")
         #Get Cluster Security Group Info
+        response = emr.describe_cluster(ClusterId=cluster_id) # for the sake of var scope
         master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
         slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
 
@@ -210,6 +217,7 @@ def emr_newcluster(btn):
                 print("Ingress {} added".format(name))
             except:
                 print("Ingress {} already added".format(name))
+            progress.value += 2
 
         firewall_allow_list = [
             (master_security_group, 'SSH', 22),
@@ -226,16 +234,18 @@ def emr_newcluster(btn):
         ]
         for rule in firewall_allow_list:
             add_security_group(*rule)
+        progress.value = 50
 
         print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
 
         while str(response['Cluster']['Status']['State']) == 'STARTING':
-                time.sleep(5)
+                time.sleep(10)
                 print(".", end="")
                 response = emr.describe_cluster(
                     ClusterId=cluster_id
                 )
         print('...Done',end="")
+        progress.value = 80
 
         print ("\n\nRunning Bootstrap Actions.\nThis will take a few minutes...\n\n***Please Wait***\n\nBootstrapping.",end="")
 
@@ -246,6 +256,7 @@ def emr_newcluster(btn):
                     ClusterId=cluster_id
                 )
         print('...Done',end="")
+        progress.value = 90
         # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
 
         #Refresh Cluster Description
@@ -267,7 +278,9 @@ def emr_newcluster(btn):
         os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
             load_notebook_location=emr_config['load_notebook_location'], **ctx))
         
+        progress.value = 100
         print('Everything is ready!')
+        
     t_background_emr_provision = threading.Thread(target=background_emr_provision)
     t_background_emr_provision.start()
 
