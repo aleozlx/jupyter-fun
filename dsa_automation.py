@@ -377,4 +377,6 @@ def ui_emr_services(cluster_id=None):
         <a href="https://{master_name}:8888/">[Hue]</a>
         <a href="https://{master_name}:16010/">[HBase]</a>
         """)
+    else:
+        return HTML('Cluster not found.')
     
