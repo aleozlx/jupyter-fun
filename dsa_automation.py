@@ -368,15 +368,15 @@ def ui_emr_services(cluster_id=None):
     if ret:
         (master_name, ) = ret
         return HTML("""
-        <a href="https://{master_name}:9443/">[Jupyter Notebook]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:9443/">[Jupyter Notebook]</a>
         <p><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</p>
-        <br/>
-        <a href="https://{master_name}:8088/">[YARN]</a>
-        <a href="https://{master_name}:50070/">[HDFS]</a>
-        <a href="https://{master_name}:18080/">[Spark History]</a>
-        <a href="https://{master_name}:8888/">[Hue]</a>
-        <a href="https://{master_name}:16010/">[HBase]</a>
-        """)
+        <hr/>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/">[YARN]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/">[HDFS]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/">[Spark History]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/">[Hue]</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/">[HBase]</a>
+        """.format(master_name=master_name))
     else:
         return HTML('Cluster not found.')
     
