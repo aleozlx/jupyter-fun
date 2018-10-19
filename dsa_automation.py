@@ -316,6 +316,7 @@ def emr_onterminate(btn):
         (emr_pem_file, ) = ret
     else: return
     res = ec2.delete_key_pair(KeyName=emr_pem_file)
+    os.remove('{}.pem'.format(emr_pem_file))
 
 def ui_emr(init=True):
     if init:
@@ -356,4 +357,24 @@ def ui_emr(init=True):
         columns=['cluster_id', 'time', 'state'])
     display(HTML(clusters.to_html()))
 
-
+def ui_emr_services(cluster_id=None):
+    if cluster_id is None:
+        ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated' and state!='terminating';").fetchone()
+        if ret:
+            (cluster_id, ) = ret
+        else:
+            return HTML('No running cluster.')
+    ret = localdb.execute("SELECT v FROM my_clusters_facts WHERE cluster_id=? AND k=?;", (cluster_id, 'master_name')).fetchone()
+    if ret:
+        (master_name, ) = ret
+        return HTML("""
+        <a href="https://{master_name}:9443/">[Jupyter Notebook]</a>
+        <p><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</p>
+        <br/>
+        <a href="https://{master_name}:8088/">[YARN]</a>
+        <a href="https://{master_name}:50070/">[HDFS]</a>
+        <a href="https://{master_name}:18080/">[Spark History]</a>
+        <a href="https://{master_name}:8888/">[Hue]</a>
+        <a href="https://{master_name}:16010/">[HBase]</a>
+        """)
+    
