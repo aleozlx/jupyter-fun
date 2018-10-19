@@ -162,7 +162,10 @@ def emr_newcluster(btn):
     cluster_id = response['JobFlowId']
     localdb.execute('INSERT INTO my_clusters VALUES (?, "unknown", ?);',
         (cluster_id, datetime.datetime.now()))
-    localdb.commit()
+    try:
+        localdb.commit()
+    except:
+        pass
 
     response = emr.describe_cluster(
         ClusterId=cluster_id
@@ -185,7 +188,6 @@ def emr_newcluster(btn):
     ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
     for k, v in ctx.items():
         localdb.execute('INSERT INTO my_clusters_facts VALUES (?, ?, ?);', (cluster_id, k, v))
-    localdb.commit()
 
     def add_security_group(group_id, name, port):
         try:
@@ -255,7 +257,14 @@ def emr_newcluster(btn):
     env.warn_only
     os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
         load_notebook_location=emr_config['load_notebook_location'], **ctx))
+    
     print('Everything is ready!')
+    for i in range(5):
+        try: # Sqlite vs NFS
+            localdb.commit()
+            break
+        except: # OperationalError disk I/O error
+            time.sleep(1)
 
 def emr_onrefresh(btn):
     while 1:
