@@ -154,7 +154,7 @@ def emr_newcluster(btn):
             { 'Name': 'Hadoop' },
             { 'Name': 'Hive' },
             { 'Name': 'Spark' },
-            { 'Name': 'Pig' },
+            # { 'Name': 'Pig' },
             { 'Name': 'JupyterHub' }
         ],
         Configurations=[
@@ -401,8 +401,10 @@ def ui_emr_services(cluster_id=None):
         <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:8088/" target="_blank">YARN</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:50070/" target="_blank">HDFS</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:18080/" target="_blank">Spark History</a>
+        <!--
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/" target="_blank">Hue</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/" target="_blank">HBase</a>
+        -->
         <hr/>
         <p><strong>Or SSH access to the master node from a
             <a href="https://jupyterhub.dsa.missouri.edu/user/{system_user_name}/terminals/1" target="_blank">terminal</a></strong></p>
