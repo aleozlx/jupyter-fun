@@ -278,7 +278,7 @@ def emr_onterminate(btn):
     ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state='unknown' or state='ready';").fetchone()
     if ret:
         (cluster_id, ) = ret
-    else: break
+    else: return
     emr.set_termination_protection(
         JobFlowIds=[ cluster_id ],
         TerminationProtected=False
@@ -289,7 +289,7 @@ def emr_onterminate(btn):
     ret = localdb.execute("SELECT v FROM my_clusters_facts WHERE cluster_id=? AND k=?;", (cluster_id, 'emr_pem_file')).fetchone()
     if ret:
         (emr_pem_file, ) = ret
-    else: break
+    else: return
     res = ec2.delete_key_pair(KeyName=emr_pem_file)
 
 def ui_emr(init=True):
