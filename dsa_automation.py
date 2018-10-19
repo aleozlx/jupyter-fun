@@ -285,17 +285,15 @@ def emr_newcluster(btn):
     t_background_emr_provision.start()
 
 def emr_onrefresh(btn):
-    while 1:
-        ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated';").fetchone()
-        if ret:
-            (cluster_id, ) = ret
-        else: break
-        res = emr.describe_cluster(ClusterId=cluster_id)
-        if res['Cluster']['Status']['State'] == 'WAITING':
-            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('ready', cluster_id))
-        else:
-            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", (res['Cluster']['Status']['State'].lower(), cluster_id))
-        time.sleep(0.3)
+    ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated';").fetchone()
+    if ret:
+        (cluster_id, ) = ret
+    else: return
+    res = emr.describe_cluster(ClusterId=cluster_id)
+    if res['Cluster']['Status']['State'] == 'WAITING':
+        localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('ready', cluster_id))
+    else:
+        localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", (res['Cluster']['Status']['State'].lower(), cluster_id))
     try_commitdb()
     clear_output()
     ui_emr(False)
@@ -305,6 +303,7 @@ def emr_onterminate(btn):
     if ret:
         (cluster_id, ) = ret
     else: return
+    print('Terminating the cluster.')
     emr.set_termination_protection(
         JobFlowIds=[ cluster_id ],
         TerminationProtected=False
