@@ -2,7 +2,7 @@ import os, sys, subprocess, uuid
 import datetime
 import sqlite3
 import requests
-from ipywidgets import Button, HBox
+from ipywidgets import Button, HBox, IntProgress
 import IPython.display
 from IPython.display import Javascript, HTML, display, clear_output
 
@@ -22,6 +22,10 @@ def inside_docker():
     return docker_flag
 
 def nbid():
+    """ This function must be called from a Jupyter kernel.
+    It will securely generate an identifier of the caller to the current working directory.
+    Many ways of illegal access will be detected by the subprocess, that will halt unobtrusively for self-protection.
+    """
     subprocess.Popen(
         ['/dsa/data/scripts/nbid', notebook_path],
         stdout=subprocess.PIPE
@@ -59,7 +63,7 @@ def aml_onrefresh(btn=None):
     else: return
     res = requests.get('http://128.206.117.147:5000/r/{}'.format(track_id), timeout=5).json()
     if res['status'] in {'ok', 'err'}:
-        localdb.execute("UPDATE my_submissions SET state=?;", (res['status'], ))
+        localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", (res['status'], track_id))
         localdb.commit()
         clear_output()
         ui_amljob(False)
@@ -84,7 +88,7 @@ def ui_amljob(init=True):
         columns=['id', 'time', 'state'])
     display(HTML(submissions.to_html()))
 
-# EMR things stole from Matt and sugar-coated
+# EMR things stole from @blackwoodm and sugar-coated
 
 def emr_config(fname):
     import yaml
@@ -97,14 +101,12 @@ def emr_newcluster(btn):
     global emr, ec2
     config = emr_config('aws-emr-config.yml')
     secrets = emr_config('aws-emr-secrets.yml') # git-ignored
-    emr = boto3.client(
-        'emr',
+    emr = boto3.client('emr',
         region_name=config['region'],
         aws_access_key_id=secrets['access_id'],
         aws_secret_access_key=secrets['access_key']
     )
-    ec2 = boto3.client(
-        'ec2',
+    ec2 = boto3.client('ec2',
         region_name=config['region'],
         aws_access_key_id=secrets['access_id'],
         aws_secret_access_key=secrets['access_key']
@@ -121,8 +123,9 @@ def emr_newcluster(btn):
     global emr_key
     emr_key = ec2.create_key_pair(KeyName=ctx['emr_pem_file'])
     ctx['emr_key']=json.dumps(emr_key)
-    ctx['emr_key/KeyMaterial'] = emr_key['KeyMaterial']
-    os.system('echo "{emr_key/KeyMaterial}" > {emr_pem_file}.pem'.format(**ctx))
+    ctx['KeyMaterial'] = emr_key['KeyMaterial']
+    os.system('echo "{KeyMaterial}" > {emr_pem_file}.pem'.format(**ctx))
+    del ctx['KeyMaterial']
     os.chmod('{wk_dir}/{emr_pem_file}.pem'.format(**ctx), 0o400)
 
     # Launch EMR Cluster
@@ -154,30 +157,20 @@ def emr_newcluster(btn):
 
         AutoScalingRole="EMR_AutoScaling_DefaultRole",
         Applications=[
-           {
-               'Name': 'Hadoop'
-           },
-           {
-               'Name': 'Hive'
-           },
-           {
-               'Name': 'Spark'
-           },
-           {
-               'Name': 'Pig'
-           },
-           {
-               'Name': 'JupyterHub'
-           }
+            { 'Name': 'Hadoop' },
+            { 'Name': 'Hive' },
+            { 'Name': 'Spark' },
+            { 'Name': 'Pig' },
+            { 'Name': 'JupyterHub' }
         ],
         Configurations=[
             {
-           'Classification': 'spark',
-           'Configurations': [],
-           'Properties': {
-               'maximizeResourceAllocation':'true'
-           }
-           },
+                'Classification': 'spark',
+                'Configurations': [],
+                'Properties': {
+                    'maximizeResourceAllocation':'true'
+                }
+            },
         ],
         VisibleToAllUsers=False,
         EbsRootVolumeSize=10,
@@ -210,146 +203,34 @@ def emr_newcluster(btn):
 
     ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
 
-    #Create Firewall Exceptions
-    try:
-        sec_rule="SSH"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 22,
-                 'ToPort': 22,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
+    def add_security_group(group_id, name, port):
+        try:
+            data = ec2.authorize_security_group_ingress(
+                GroupId=group_id,
+                IpPermissions=[
+                    {'IpProtocol': 'tcp',
+                    'FromPort': port,
+                    'ToPort': port,
+                    'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
+                ])
+            print("Ingress {} added".format(name))
+        except:
+            print("Ingress {} already added".format(name))
 
-    try:
-        sec_rule="YARN"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 8088,
-                 'ToPort': 8088,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="HDFS NameNode"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 50070,
-                 'ToPort': 50070,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Spark History Server"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 18080,
-                 'ToPort': 18080,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Hue"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 8888,
-                 'ToPort': 8888,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="HBase"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 16010,
-                 'ToPort': 16010,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Jupyter Notebook"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=master_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 9090,
-                 'ToPort': 9090,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Slave SSH"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=slave_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 22,
-                 'ToPort': 22,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Slave YARN NodeManager"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=slave_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 8042,
-                 'ToPort': 8042,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
-
-    try:
-        sec_rule="Slave HDFS DataNode"
-        data = ec2.authorize_security_group_ingress(
-            GroupId=slave_security_group,
-            IpPermissions=[
-                {'IpProtocol': 'tcp',
-                 'FromPort': 50075,
-                 'ToPort': 50075,
-                 'IpRanges': [{'CidrIp': '128.206.0.0/16'}]},
-            ])
-        print("Ingress "+sec_rule+" added")
-    except:
-        print(sec_rule+" already added")
+    firewall_allow_list = [
+        (master_security_group, 'SSH', 22),
+        (master_security_group, 'YARN', 8088),
+        (master_security_group, 'HDFS NameNode', 50070),
+        (master_security_group, 'Spark History Server', 18080),
+        (master_security_group, 'Hue', 8888),
+        (master_security_group, 'HBase', 16010),
+        (master_security_group, 'Jupyter Notebook', 9090),
+        (master_security_group, 'Hue', 8888),
+        (slave_security_group, 'Slave SSH', 22),
+        (slave_security_group, 'Slave YARN NodeManager', 8042),
+        (slave_security_group, 'Slave HDFS DataNode', 50075),
+        
+    ]
 
     print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
 
@@ -370,7 +251,7 @@ def emr_newcluster(btn):
                 ClusterId=cluster_id
             )
     print('...Done',end="")
-    print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
+    # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
 
     #Refresh Cluster Description
     response = emr.describe_cluster(
@@ -388,33 +269,30 @@ def emr_newcluster(btn):
     env.user = 'hadoop'
     env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
     env.warn_only
-
-    def install_jupyter():
-        with hide('output'):
-            run('sudo -u root pip-3.4 install jupyter')
-            run('sudo -u root pip-3.4 install toree')
-            run('sudo -u root /usr/local/bin/jupyter toree install --spark_home=/usr/lib/spark/ --interpreters=Scala,PySpark,SparkR,SQL')
-            run('mkdir -p /home/hadoop/.jupyter/')
-            run('curl -o /home/hadoop/.jupyter/jupyter_notebook_config.py https://s3-us-west-2.amazonaws.com/dsa-mizzou/scripts/jupyter_notebook_config.py')
-            run('sudo -u root yum -y install tmux')
-            run('tmux new-session -d "jupyter notebook --no-browser --config /home/hadoop/.jupyter/jupyter_notebook_config.py"')
-
     os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan')
-
     print('Everything is ready!')
 
-
-
-
-
-
+def emr_onrefresh(btn):
+    while 1:
+        ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state='unknown' or state='ready';").fetchone()
+        if ret:
+            (cluster_id, ) = ret
+        else: break
+        res = emr.describe_cluster(ClusterId=cluster_id)
+        if res['Cluster']['Status']['State'] == 'WAITING':
+            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('ready', cluster_id))
+        elif res['Cluster']['Status']['State'] == 'TERMINATED':
+            localdb.execute("UPDATE my_clusters SET state=? WHERE cluster_id=?;", ('terminated', cluster_id))
+    localdb.commit()
+    clear_output()
+    ui_emr(False)
 
 def ui_emr(init=True):
     if init:
         btnNew = Button(description='New EMR Cluster', button_style='info')
         btnNew.on_click(emr_newcluster)
         btnRefresh = Button(description='Refresh', button_style='info')
-        #btnRefresh.on_click(aml_onrefresh)
+        btnRefresh.on_click(emr_onrefresh)
         localdb.execute("""CREATE TABLE IF NOT EXISTS my_clusters (
             cluster_id text,
             state text,
