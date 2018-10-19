@@ -90,7 +90,7 @@ def ui_amljob(init=True):
 
 # EMR things stole from @blackwoodm and sugar-coated
 
-def emr_config(fname):
+def get_emr_config(fname):
     import yaml
     with open(fname, 'r') as f:
         return yaml.load(f)
@@ -312,8 +312,8 @@ def ui_emr(init=True):
 
         import boto3
         global emr, ec2, emr_config # this does not support multi-cluster due to the singleton pattern here
-        emr_config = emr_config('aws-emr-config.yml')
-        emr_config.update(emr_config('aws-emr-secrets.yml')) # git-ignored sensitive info
+        emr_config = get_emr_config('aws-emr-config.yml')
+        emr_config.update(get_emr_config('aws-emr-secrets.yml')) # git-ignored sensitive info
         emr = boto3.client('emr',
             region_name=emr_config['region'],
             aws_access_key_id=secrets['access_id'],
