@@ -98,18 +98,15 @@ def emr_config(fname):
 def emr_newcluster(btn):
     import getpass, os, json, time, datetime
     ctx = dict() # context variables that will be persisted in a local database
-    ctx.update(config)
+    # ctx.update(emr_config)
     ctx['system_user_name'] = getpass.getuser()
     ctx['wk_dir'] = os.getcwd()
 
     # Create SSH Keypair
     ctx['emr_pem_file'] = time.strftime('EMR-%d%m%Y%H%M%S-{system_user_name}'.format(**ctx))
-    global emr_key
     emr_key = ec2.create_key_pair(KeyName=ctx['emr_pem_file'])
     ctx['emr_key']=json.dumps(emr_key)
-    ctx['KeyMaterial'] = emr_key['KeyMaterial']
-    os.system('echo "{KeyMaterial}" > {emr_pem_file}.pem'.format(**ctx))
-    del ctx['KeyMaterial']
+    os.system('echo "{KeyMaterial}" > {emr_pem_file}.pem'.format(KeyMaterial=emr_key['KeyMaterial'], **ctx))
     os.chmod('{wk_dir}/{emr_pem_file}.pem'.format(**ctx), 0o400)
 
     # Launch EMR Cluster
@@ -122,14 +119,14 @@ def emr_newcluster(btn):
                 {
                     'Name':'Master - 1',
                     'InstanceRole':'MASTER',
-                    'InstanceType':config['instance_size'],
-                    'InstanceCount':config['master_instances'],
+                    'InstanceType':emr_config['instance_size'],
+                    'InstanceCount':emr_config['master_instances'],
                 },
                 {
                     'Name':'Core - 2',
                     'InstanceRole':'CORE',
-                    'InstanceType':config['instance_size'],
-                    'InstanceCount':config['master_instances'],
+                    'InstanceType':emr_config['instance_size'],
+                    'InstanceCount':emr_config['master_instances'],
                 },
             ],
             'KeepJobFlowAliveWhenNoSteps': True,
@@ -256,7 +253,8 @@ def emr_newcluster(btn):
     env.user = 'hadoop'
     env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
     env.warn_only
-    os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan')
+    os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
+        load_notebook_location=emr_config['load_notebook_location'], **ctx))
     print('Everything is ready!')
 
 def emr_onrefresh(btn):
@@ -312,18 +310,17 @@ def ui_emr(init=True):
         );""")
         display(HBox([btnNew, btnRefresh, btnTerminate]))
 
-        # this does not support multi-cluster due to singleton pattern
         import boto3
-        global emr, ec2
-        config = emr_config('aws-emr-config.yml')
-        secrets = emr_config('aws-emr-secrets.yml') # git-ignored
+        global emr, ec2, emr_config # this does not support multi-cluster due to the singleton pattern here
+        emr_config = emr_config('aws-emr-config.yml')
+        emr_config.update(emr_config('aws-emr-secrets.yml')) # git-ignored sensitive info
         emr = boto3.client('emr',
-            region_name=config['region'],
+            region_name=emr_config['region'],
             aws_access_key_id=secrets['access_id'],
             aws_secret_access_key=secrets['access_key']
         )
         ec2 = boto3.client('ec2',
-            region_name=config['region'],
+            region_name=emr_config['region'],
             aws_access_key_id=secrets['access_id'],
             aws_secret_access_key=secrets['access_key']
         )
