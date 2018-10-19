@@ -199,7 +199,7 @@ def emr_newcluster(btn):
 
     def background_emr_provision():
         print("\n\nProceeding with Firewall Rules...")
-        progress.description = 'Adding security groups...'
+        progress.description = 'Tweaking firewall...'
         #Get Cluster Security Group Info
         response = emr.describe_cluster(ClusterId=cluster_id) # for the sake of var scope
         master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
@@ -270,6 +270,7 @@ def emr_newcluster(btn):
         # volume metadata: ec2.Volume(id)
         progress.description = 'Mounting EBS...'
         master_instance = [i for i in emr.list_instances(ClusterId=cluster_id)['Instances'] if i['PublicDnsName']==ctx['master_name']][0]
+        # home_volume = ec2.create_volume(AvailabilityZone=response['Cluster']['Ec2InstanceAttributes']['Ec2AvailabilityZone'], Size=8)
         ec2.attach_volume(InstanceId=master_instance['Ec2InstanceId'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/xvdz')
         
         #Bootstrap Cluster with Fabric
@@ -290,9 +291,9 @@ def emr_newcluster(btn):
             run('sudo docker restart jupyterhub')
             run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
             run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
-            run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger\'')
+            run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger!!\'')
+            run('sudo docker exec jupyterhub mount /dev/xvdz /home/jovyan/workspace')
             run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
-            run('sudo docker exec jupyterhub mount /dev/xvdz /mnt')
         
         progress.value = 100
         progress.description = 'Done.'
