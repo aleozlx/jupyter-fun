@@ -176,26 +176,26 @@ def emr_newcluster(btn):
     try_commitdb()
 
     print("Provisioning a new EMR cluster from AWS. Please do not refresh until it is done.")
+    while 1:
+        response = emr.describe_cluster(ClusterId=cluster_id)
+        try:
+            response['Cluster']['MasterPublicDnsName'].find("ec2")
+            print('...Cluster DNS Active',end="")
+            break
+        except:
+            time.sleep(5)
+            print(".", end="")
+            pass
+    
+    ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
+    localdb.execute('INSERT INTO my_clusters_facts VALUES (?, "master_name", ?);', (cluster_id, ctx['master_name']))
+    try_commitdb()
 
     def background_emr_provision():
-        while 1:
-            response = emr.describe_cluster(ClusterId=cluster_id)
-            try:
-                response['Cluster']['MasterPublicDnsName'].find("ec2")
-                print('...Cluster DNS Active',end="")
-                break
-            except:
-                time.sleep(5)
-                print(".", end="")
-                pass
         print("\n\nProceeding with Firewall Rules...")
         #Get Cluster Security Group Info
         master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
         slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
-
-        ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
-        localdb.execute('INSERT INTO my_clusters_facts VALUES (?, "master_name", ?);', (cluster_id, ctx['master_name']))
-        try_commitdb()
 
         def add_security_group(group_id, name, port):
             try:
