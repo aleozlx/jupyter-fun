@@ -15,7 +15,7 @@ def scary(code):
 def scarier(code):
     return Javascript(scary_template.replace('"', "`").format(code))
 
-display(scarier("__notebook_path='${IPython.notebook.notebook_path}'; scary_stuff.notebook_path=__notebook_path"))
+display(scarier("__notebook_path='${IPython.notebook.notebook_path}'; dsa_automation.notebook_path=__notebook_path"))
 
 def inside_docker():
     docker_flag = os.system("grep -q docker /proc/1/cgroup")==0
