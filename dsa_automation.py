@@ -395,7 +395,12 @@ def ui_emr_services(cluster_id=None):
         return HTML("""
         <p><strong>Log into your dedicated Jupyter from AWS EMR Cluster</strong></p>
         <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
-        <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
+        <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter
+        <p>
+          Chrome will suggest that the connection is not private, but it is. This appears this way because we are using self-signed cert that is not recognized by Cert Authorities.
+          It is safe to proceed by clicking the "ADVANCED" link at the left bottom of the page and then the "Proceed to ...compute.amazonaws.com (unsafe)" link.
+        </p>
+        </blockquote>
         <hr/>
         <p><strong>Or check out the Hadoop ecosystem provided by AWS EMR</strong></p>
         <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:8088/" target="_blank">YARN</a>
