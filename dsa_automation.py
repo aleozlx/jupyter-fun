@@ -364,20 +364,25 @@ def ui_emr_services(cluster_id=None):
             (cluster_id, ) = ret
         else:
             return HTML('No running cluster.')
-    ret = localdb.execute("SELECT v FROM my_clusters_facts WHERE cluster_id=? AND k=?;", (cluster_id, 'master_name')).fetchone()
+    ret = localdb.execute("SELECT k,v FROM my_clusters_facts WHERE cluster_id=?;", (cluster_id, )).fetchall()
     if ret:
-        (master_name, ) = ret
+        ctx = {k:v for k,v in ret}
         return HTML("""
-        <p>Log into your dedicated Jupyter from AWS EMR Cluster</p>
+        <p><strong>Log into your dedicated Jupyter from AWS EMR Cluster</strong></p>
         <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
         <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
         <hr/>
+        <p><strong>Or check out the Hadoop ecosystem provided by AWS EMR</strong></p>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/" target="_blank">YARN</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/" target="_blank">HDFS</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/" target="_blank">Spark History</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/" target="_blank">Hue</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/" target="_blank">HBase</a>
-        """.format(master_name=master_name))
+        <hr/>
+        <p><strong>Or SSH access to the master node from a
+            <a href="https://jupyterhub.dsa.missouri.edu/user/{system_user_name}/terminals/1" target="_blank">terminal</a></strong></p>
+        <pre>ssh -i {wk_dir}/{emr_pem_file}.pem hadoop@{master_name}</pre>
+        """.format(**ctx))
     else:
         return HTML('Cluster not found.')
     
