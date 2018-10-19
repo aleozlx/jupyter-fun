@@ -139,7 +139,7 @@ def emr_newcluster(btn):
                     'Name':'Core - 2',
                     'InstanceRole':'CORE',
                     'InstanceType':emr_config['instance_size'],
-                    'InstanceCount':emr_config['master_instances'],
+                    'InstanceCount':emr_config['slave_instances'],
                 },
             ],
             'KeepJobFlowAliveWhenNoSteps': True,
@@ -258,16 +258,17 @@ def emr_newcluster(btn):
                 )
         print('...Done',end="")
         progress.value = 90
-        # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
-
-        # home_volume = ec2.Volume(id)
-        ec2.attach_volume(InstanceId=ctx['master_name'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/sdz')
+        # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])      
 
         #Refresh Cluster Description
-        # response = emr.describe_cluster(
-        #     ClusterId=cluster_id
-        # )
+        response = emr.describe_cluster(
+            ClusterId=cluster_id
+        )
 
+        # volume metadata: ec2.Volume(id)
+        master_instance = [i for i in emr.list_instances(ClusterId=cluster_id)['Instances'] if i['PublicDnsName']==ctx['master_name']][0]
+        ec2.attach_volume(InstanceId=master_instance['Ec2InstanceId'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/xvdz')
+        
         #Bootstrap Cluster with Fabric
         from fabric import tasks
         from fabric.api import run
@@ -279,8 +280,12 @@ def emr_newcluster(btn):
         env.user = 'hadoop'
         env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
         env.warn_only
-        os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
-            load_notebook_location=emr_config['load_notebook_location'], **ctx))
+        # os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
+        #     load_notebook_location=emr_config['load_notebook_location'], **ctx))
+
+        with hide('output'):
+            run('sudo docker restart jupyterhub')
+            run('sudo docker exec jupyterhub mount /dev/xvdz /mnt')
         
         progress.value = 100
         print('Everything is ready!')
@@ -384,9 +389,9 @@ def ui_emr_services(cluster_id=None):
         <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter</blockquote>
         <hr/>
         <p><strong>Or check out the Hadoop ecosystem provided by AWS EMR</strong></p>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8088/" target="_blank">YARN</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:50070/" target="_blank">HDFS</a>
-        <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:18080/" target="_blank">Spark History</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:8088/" target="_blank">YARN</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:50070/" target="_blank">HDFS</a>
+        <a class="jupyter-widgets jupyter-button widget-button" href="http://{master_name}:18080/" target="_blank">Spark History</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:8888/" target="_blank">Hue</a>
         <a class="jupyter-widgets jupyter-button widget-button" href="https://{master_name}:16010/" target="_blank">HBase</a>
         <hr/>
