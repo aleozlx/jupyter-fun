@@ -235,6 +235,7 @@ def emr_newcluster(btn):
         for rule in firewall_allow_list:
             add_security_group(*rule)
         progress.value = 50
+        progress.description = 'Patience..'
 
         print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
 
@@ -259,10 +260,13 @@ def emr_newcluster(btn):
         progress.value = 90
         # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
 
+        # home_volume = ec2.Volume(id)
+        ec2.attach_volume(InstanceId=ctx['master_name'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/sdz')
+
         #Refresh Cluster Description
-        response = emr.describe_cluster(
-            ClusterId=cluster_id
-        )
+        # response = emr.describe_cluster(
+        #     ClusterId=cluster_id
+        # )
 
         #Bootstrap Cluster with Fabric
         from fabric import tasks
@@ -283,6 +287,13 @@ def emr_newcluster(btn):
         
     t_background_emr_provision = threading.Thread(target=background_emr_provision)
     t_background_emr_provision.start()
+
+def emr_map_ebs(sso=None):
+    if sso is None:
+        import getpass
+        sso = getpass.getuser()
+    ebs_mapping = {'zy5f9': 'vol-08d67fa11f94f963b'}
+    return ebs_mapping[sso]
 
 def emr_onrefresh(btn):
     ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state!='terminated';").fetchone()
