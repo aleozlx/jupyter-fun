@@ -72,9 +72,9 @@ def aml_onrefresh(btn=None):
 
 def ui_amljob(init=True):
     if init:
-        btnSubmit = Button(description='New submission', button_style='info')
+        btnSubmit = Button(description='New submission', button_style='primary')
         btnSubmit.on_click(aml_onsubmit)
-        btnRefresh = Button(description='Refresh', button_style='info')
+        btnRefresh = Button(description='Refresh', button_style='primary')
         btnRefresh.on_click(aml_onrefresh)
         localdb.execute("""CREATE TABLE IF NOT EXISTS my_submissions (
             track_id text,
@@ -186,6 +186,9 @@ def emr_newcluster(btn):
     slave_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedSlaveSecurityGroup']
 
     ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
+    for k, v in ctx.items():
+        localdb.execute('INSERT INTO my_clusters_facts VALUES (?, ?, ?);', (cluster_id, k, v))
+    localdb.commit()
 
     def add_security_group(group_id, name, port):
         try:
@@ -271,12 +274,32 @@ def emr_onrefresh(btn):
     clear_output()
     ui_emr(False)
 
+def emr_onterminate(btn):
+    ret = localdb.execute("SELECT cluster_id FROM my_clusters WHERE state='unknown' or state='ready';").fetchone()
+    if ret:
+        (cluster_id, ) = ret
+    else: break
+    emr.set_termination_protection(
+        JobFlowIds=[ cluster_id ],
+        TerminationProtected=False
+    )
+    res = emr.terminate_job_flows(
+        JobFlowIds=[ cluster_id ]
+    )
+    ret = localdb.execute("SELECT v FROM my_clusters_facts WHERE cluster_id=? AND k=?;", (cluster_id, 'emr_pem_file')).fetchone()
+    if ret:
+        (emr_pem_file, ) = ret
+    else: break
+    res = ec2.delete_key_pair(KeyName=emr_pem_file)
+
 def ui_emr(init=True):
     if init:
-        btnNew = Button(description='New EMR Cluster', button_style='info')
+        btnNew = Button(description='New EMR Cluster', button_style='primary')
         btnNew.on_click(emr_newcluster)
-        btnRefresh = Button(description='Refresh', button_style='info')
+        btnRefresh = Button(description='Refresh', button_style='primary')
         btnRefresh.on_click(emr_onrefresh)
+        btnTerminate = Button(description='Terminate', button_style='danger')
+        btnTerminate.on_click(emr_onterminate)
         localdb.execute("""CREATE TABLE IF NOT EXISTS my_clusters (
             cluster_id text,
             state text,
@@ -287,7 +310,7 @@ def ui_emr(init=True):
             k text,
             v text
         );""")
-        display(HBox([btnNew, btnRefresh]))
+        display(HBox([btnNew, btnRefresh, btnTerminate]))
 
         # this does not support multi-cluster due to singleton pattern
         import boto3
