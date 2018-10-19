@@ -199,6 +199,7 @@ def emr_newcluster(btn):
 
     def background_emr_provision():
         print("\n\nProceeding with Firewall Rules...")
+        progress.description = 'Adding security groups...'
         #Get Cluster Security Group Info
         response = emr.describe_cluster(ClusterId=cluster_id) # for the sake of var scope
         master_security_group = response['Cluster']['Ec2InstanceAttributes']['EmrManagedMasterSecurityGroup']
@@ -235,7 +236,7 @@ def emr_newcluster(btn):
         for rule in firewall_allow_list:
             add_security_group(*rule)
         progress.value = 50
-        progress.description = 'Patience..'
+        progress.description = 'Starting instances...'
 
         print ("\n\nFinishing Startup.\nThis will take a few minutes...\n\n***Please Wait***\n\nStarting.",end="")
 
@@ -247,6 +248,7 @@ def emr_newcluster(btn):
                 )
         print('...Done',end="")
         progress.value = 80
+        progress.description = 'Bootstrapping...'
 
         print ("\n\nRunning Bootstrap Actions.\nThis will take a few minutes...\n\n***Please Wait***\n\nBootstrapping.",end="")
 
@@ -266,6 +268,7 @@ def emr_newcluster(btn):
         )
 
         # volume metadata: ec2.Volume(id)
+        progress.description = 'Mounting persistent storage...'
         master_instance = [i for i in emr.list_instances(ClusterId=cluster_id)['Instances'] if i['PublicDnsName']==ctx['master_name']][0]
         ec2.attach_volume(InstanceId=master_instance['Ec2InstanceId'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/xvdz')
         
