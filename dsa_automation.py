@@ -99,6 +99,21 @@ def ui_amljob(init=True):
         columns=['id', 'time', 'state'])
     display(HTML(submissions.to_html()))
 
+def tf_limit(tf, n, p=None):
+    if p:
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=p)
+    else:
+        gpu_options = tf.GPUOptions()
+
+    tfconfig = tf.ConfigProto(
+        # set both to be equal to PHYSICAL cores for optimal performance
+        intra_op_parallelism_threads=n,
+        inter_op_parallelism_threads=n,
+        allow_soft_placement=True,
+        gpu_options = gpu_options
+    )
+    return tfconfig
+
 # EMR things stole from @blackwoodm and sugar-coated
 
 def get_emr_config(fname):
