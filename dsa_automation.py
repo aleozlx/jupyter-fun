@@ -32,7 +32,7 @@ def nbid():
         stdout=subprocess.PIPE
     ).stdout.read().decode('ascii')
 
-def aml_list(path, excludes = ['.ipynb_checkpoints', '__pycache__', 'local.db'], exclude_exts = ['.ipynb', '.tgz']):
+def aml_list(path, excludes = ['.ipynb_checkpoints', '__pycache__', 'local.db'], exclude_exts = ['.tgz', '.h5']):
     return [fname for fname in set(os.listdir(path)) - set(excludes) if os.path.splitext(fname)[1] not in exclude_exts]
 
 def aml_archive(fnames):
