@@ -70,6 +70,11 @@ def aml_onrefresh(btn=None):
         ui_amljob(False)
         if res['status']=='ok':
             os.system('wget http://128.206.117.147:5000/f/{} -O {}'.format(track_id, res['data']))
+    elif res['status'] == 'pending':
+        localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", (res['msg'], track_id))
+        localdb.commit()
+        clear_output()
+        ui_amljob(False)
 
 def ui_amljob(init=True):
     if init:
