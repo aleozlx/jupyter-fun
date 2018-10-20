@@ -54,7 +54,7 @@ def aml_onsubmit(btn=None):
     # print(res)
     localdb.execute('INSERT INTO my_submissions VALUES (?, ?, "unknown", ?);',
         (str(track_id), str(files), datetime.datetime.now()))
-    localdb.commit()
+    try_commitdb()
     aml_onrefresh()
 
 def aml_onrefresh(btn=None):
@@ -65,14 +65,14 @@ def aml_onrefresh(btn=None):
     res = requests.get('http://128.206.117.147:5000/r/{}'.format(track_id), timeout=5).json()
     if res['status'] in {'ok', 'err'}:
         localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", (res['status'], track_id))
-        localdb.commit()
+        try_commitdb()
         clear_output()
         ui_amljob(False)
         if res['status']=='ok':
             os.system('wget http://128.206.117.147:5000/f/{} -O {}'.format(track_id, res['data']))
     elif res['status'] == 'pending':
         localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", (res['msg'], track_id))
-        localdb.commit()
+        try_commitdb()
         clear_output()
         ui_amljob(False)
 
