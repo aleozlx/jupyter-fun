@@ -63,7 +63,7 @@ def aml_onsubmit(btn=None):
     aml_onrefresh()
 
 def aml_onrefresh(btn=None):
-    ret = localdb.execute("SELECT track_id FROM my_submissions WHERE state!='ok';").fetchone()
+    ret = localdb.execute("SELECT track_id FROM my_submissions WHERE state!='ok' and state!='err'';").fetchone()
     if ret:
         (track_id, ) = ret
     else: return
