@@ -50,7 +50,7 @@ def aml_submit():
     return track_id, files, res
 
 def aml_onsubmit(btn=None):
-    ret = localdb.execute('SELECT COUNT(*) AS ct_unfinished FROM my_submissions WHERE state!="ok";')
+    ret = localdb.execute('SELECT COUNT(*) AS ct_unfinished FROM my_submissions WHERE state!="ok";').fetchone()
     if ret:
         (ct_unfinished, ) = ret
         if ct_unfinished > 0: # deny concurrent submissions
