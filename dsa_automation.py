@@ -103,7 +103,7 @@ def ui_amljob(init=True):
             state text,
             ts timestamp
         );""")
-        display(HBox([btnSubmit, btnRefresh]))
+        display(HBox([btnSubmit, btnRefresh, btnRevoke]))
     import pandas as pd
     submissions = pd.DataFrame(localdb.execute("SELECT track_id, ts, state FROM my_submissions;").fetchall(),
         columns=['id', 'time', 'state'])
