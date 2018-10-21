@@ -73,6 +73,8 @@ def aml_onrefresh(btn=None):
         # something happened to scratch space or redis, setting state to err.
         localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", ('err', track_id))
         try_commitdb()
+        clear_output()
+        ui_amljob(False)
         return
     if res['status'] in {'ok', 'err'}:
         localdb.execute("UPDATE my_submissions SET state=? WHERE track_id=?;", (res['status'], track_id))
