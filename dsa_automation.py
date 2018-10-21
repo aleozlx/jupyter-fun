@@ -81,12 +81,22 @@ def aml_onrefresh(btn=None):
         clear_output()
         ui_amljob(False)
 
+def aml_onrevoke(btn=None):
+    ret = localdb.execute("SELECT track_id FROM my_submissions WHERE state!='ok' and state!='err';").fetchone()
+    if ret:
+        (track_id, ) = ret
+    else: return
+    print('terminating task {}'.format(track_id))
+    res = requests.post('http://128.206.117.147:5000/del/{}'.format(track_id), timeout=5).json()
+
 def ui_amljob(init=True):
     if init:
         btnSubmit = Button(description='New submission', button_style='primary')
         btnSubmit.on_click(aml_onsubmit)
         btnRefresh = Button(description='Refresh', button_style='primary')
         btnRefresh.on_click(aml_onrefresh)
+        btnRevoke = Button(description='Revoke', button_style='danger')
+        btnRevoke.on_click(aml_onrevoke)
         localdb.execute("""CREATE TABLE IF NOT EXISTS my_submissions (
             track_id text,
             files text,
