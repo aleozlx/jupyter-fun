@@ -197,6 +197,7 @@ def emr_newcluster(btn):
             { 'Name': 'Hadoop' },
             { 'Name': 'Hive' },
             { 'Name': 'Spark' },
+            { 'Name': 'ZooKeeper' },
             # { 'Name': 'Pig' },
             { 'Name': 'JupyterHub' }
         ],
@@ -235,7 +236,7 @@ def emr_newcluster(btn):
             print(".", end="")
             pass
     progress.value = 15
-    
+
     ctx['master_name'] = response['Cluster']['MasterPublicDnsName']
     localdb.execute('INSERT INTO my_clusters_facts VALUES (?, "master_name", ?);', (cluster_id, ctx['master_name']))
     try_commitdb()
@@ -303,7 +304,7 @@ def emr_newcluster(btn):
                 )
         print('...Done',end="")
         progress.value = 90
-        # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])      
+        # print('\n\nCluster Status: '+response['Cluster']['Status']['State'])
 
         #Refresh Cluster Description
         response = emr.describe_cluster(
@@ -315,7 +316,7 @@ def emr_newcluster(btn):
         master_instance = [i for i in emr.list_instances(ClusterId=cluster_id)['Instances'] if i['PublicDnsName']==ctx['master_name']][0]
         # home_volume = ec2.create_volume(AvailabilityZone=response['Cluster']['Ec2InstanceAttributes']['Ec2AvailabilityZone'], Size=8)
         ec2.attach_volume(InstanceId=master_instance['Ec2InstanceId'], VolumeId=emr_map_ebs(ctx['system_user_name']), Device='/dev/xvdz')
-        
+
         #Bootstrap Cluster with Fabric
         from fabric import tasks
         from fabric.api import run
@@ -327,21 +328,29 @@ def emr_newcluster(btn):
         env.user = 'hadoop'
         env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
         env.warn_only
-        # os.system('StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/{load_notebook_location} hadoop@{master_name}:/var/lib/jupyter/home/jovyan'.format(
-        #     load_notebook_location=emr_config['load_notebook_location'], **ctx))
+
         # just in case https://jpetazzo.github.io/2015/01/13/docker-mount-dynamic-volumes/
         with hide('output'):
+            # Transfer current working directory
+            run('sudo mkdir /var/lib/jupyter/home/jovyan/.transfer_in && sudo chmod o+w /var/lib/jupyter/home/jovyan/.transfer_in')
+            os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/var/lib/jupyter/home/jovyan/.transfer_in'.format(**ctx))
+            # Sanitize and grant permissions
+            run('sudo rm -f /var/lib/jupyter/home/jovyan/.transfer_in/{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}')
+            run('sudo chown -R 1000:100 /var/lib/jupyter/home/jovyan/.transfer_in/*')
+            # Pass through and mount EBS
             run('sudo docker restart jupyterhub')
             run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
             run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
             run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger!!\'')
             run('sudo docker exec jupyterhub mount /dev/xvdz /home/jovyan/workspace')
             run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
-        
+            # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
+            run("sudo docker exec jupyterhub bash -c 'ls /home/jovyan/workspace/*.ipynb || cp -a /home/jovyan/.transfer_in/* /home/jovyan/workspace/'")
+
         progress.value = 100
         progress.description = 'Done.'
         print('Everything is ready!')
-        
+
     t_background_emr_provision = threading.Thread(target=background_emr_provision)
     t_background_emr_provision.start()
 
@@ -460,4 +469,4 @@ def ui_emr_services(cluster_id=None):
         """.format(**ctx))
     else:
         return HTML('Cluster not found.')
-    
+
