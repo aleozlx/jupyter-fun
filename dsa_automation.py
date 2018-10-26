@@ -199,7 +199,7 @@ def emr_newcluster(btn):
             { 'Name': 'Spark' },
             { 'Name': 'ZooKeeper' },
             # { 'Name': 'Pig' },
-            { 'Name': 'JupyterHub' }
+            # { 'Name': 'JupyterHub' }
         ],
         Configurations=[
             {
@@ -210,6 +210,26 @@ def emr_newcluster(btn):
                 }
             },
         ],
+        # Steps=[
+        #     {
+        #         "Name":"Copy AmazonReviews",
+        #         "ActionOnFailure":"CONTINUE",
+        #         "HadoopJarStep": {
+        #             "Args":["s3-dist-cp","--s3Endpoint=s3.amazonaws.com","--src=s3://amazon-cleaned-reviews/cleaned_reviews.json","--dest=hdfs:///datasets/cleaned_reviews.json"],
+        #             "Jar":"command-runner.jar"
+        #
+        #          }
+        #     },
+        #     {
+        #         "Name":"Copy Titanic",
+        #         "ActionOnFailure":"CONTINUE",
+        #         "HadoopJarStep": {
+        #             "Args":["s3-dist-cp","--s3Endpoint=s3.amazonaws.com","--src=s3://dsa-titanic-dataset/titanic.csv","--dest=hdfs:///datasets/titanic.csv"],
+        #             "Jar":"command-runner.jar"
+        #
+        #          }
+        #     }
+        # ],
         VisibleToAllUsers=False,
         EbsRootVolumeSize=10,
         JobFlowRole='EMR_EC2_DefaultRole',
@@ -327,25 +347,33 @@ def emr_newcluster(btn):
         env.host_string = ctx['master_name']
         env.user = 'hadoop'
         env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
-        env.warn_only
+        env.warn_only = True
 
         # just in case https://jpetazzo.github.io/2015/01/13/docker-mount-dynamic-volumes/
-        with hide('output'):
-            # Transfer current working directory
-            run('sudo mkdir /var/lib/jupyter/home/jovyan/.transfer_in && sudo chmod o+w /var/lib/jupyter/home/jovyan/.transfer_in')
-            os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/var/lib/jupyter/home/jovyan/.transfer_in'.format(**ctx))
-            # Sanitize and grant permissions
-            run('sudo rm -f /var/lib/jupyter/home/jovyan/.transfer_in/{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}')
-            run('sudo chown -R 1000:100 /var/lib/jupyter/home/jovyan/.transfer_in/*')
-            # Pass through and mount EBS
-            run('sudo docker restart jupyterhub')
-            run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
-            run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
-            run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger!!\'')
-            run('sudo docker exec jupyterhub mount /dev/xvdz /home/jovyan/workspace')
-            run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
-            # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
-            run("sudo docker exec jupyterhub bash -c 'ls /home/jovyan/workspace/*.ipynb || cp -a /home/jovyan/.transfer_in/* /home/jovyan/workspace/'")
+        with hide('running'):
+            os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/home/hadoop'.format(**ctx))
+            # install jupyter
+            run("python3 -m pip install --quiet jupyter")
+            run("mkdir datasets")
+            run("aws s3 cp --quiet s3://dsa-titanic-dataset/titanic.csv datasets/titanic.csv")
+            run("aws s3 cp --quiet s3://amazon-cleaned-reviews/cleaned_reviews.json datasets/cleaned_reviews.json")
+            run("jupyter notebook --port 9443 --no-browser --ip 0.0.0.0")
+
+            # # Transfer current working directory
+            # run('sudo mkdir /var/lib/jupyter/home/jovyan/.transfer_in && sudo chmod o+w /var/lib/jupyter/home/jovyan/.transfer_in')
+            # os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/var/lib/jupyter/home/jovyan/.transfer_in'.format(**ctx))
+            # # Sanitize and grant permissions
+            # run('sudo rm -f /var/lib/jupyter/home/jovyan/.transfer_in/{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}')
+            # run('sudo chown -R 1000:100 /var/lib/jupyter/home/jovyan/.transfer_in/*')
+            # # Pass through and mount EBS
+            # run('sudo docker restart jupyterhub')
+            # run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
+            # run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
+            # run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger!!\'')
+            # run('sudo docker exec jupyterhub mount /dev/xvdz /home/jovyan/workspace')
+            # run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
+            # # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
+            # run("sudo docker exec jupyterhub bash -c 'ls /home/jovyan/workspace/*.ipynb || cp -a /home/jovyan/.transfer_in/* /home/jovyan/workspace/'")
 
         progress.value = 100
         progress.description = 'Done.'
@@ -358,7 +386,10 @@ def emr_map_ebs(sso=None):
     if sso is None:
         import getpass
         sso = getpass.getuser()
-    ebs_mapping = {'zy5f9': 'vol-08d67fa11f94f963b'}
+    ebs_mapping = {
+        'zy5f9': 'vol-08d67fa11f94f963b',
+        'jah3xc': 'vol-0595bbb96c697f311',
+    }
     return ebs_mapping[sso]
 
 def emr_onrefresh(btn):
@@ -447,7 +478,6 @@ def ui_emr_services(cluster_id=None):
         return HTML("""
         <p><strong>Log into your dedicated Jupyter from AWS EMR Cluster</strong></p>
         <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
-        <blockquote><strong>Username: </strong>jovyan <strong>Password: </strong>jupyter
         <p>
           Chrome will suggest that the connection is not private, but it is. This appears this way because we are using self-signed cert that is not recognized by Cert Authorities.
           It is safe to proceed by clicking the "ADVANCED" link at the left bottom of the page and then the "Proceed to ...compute.amazonaws.com (unsafe)" link.
