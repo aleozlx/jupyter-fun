@@ -209,6 +209,17 @@ def emr_newcluster(btn):
                     'maximizeResourceAllocation':'true'
                 }
             },
+            {
+                "Classification": "spark-env",
+                "Configurations": [
+                    {
+                        "Classification": "export",
+                        "Properties": {
+                            "PYSPARK_PYTHON": "/usr/bin/python3"
+                        }
+                    }
+                ]
+            }
         ],
         # Steps=[
         #     {
@@ -339,11 +350,10 @@ def emr_newcluster(btn):
 
         #Bootstrap Cluster with Fabric
         from fabric import tasks
-        from fabric.api import run
+        from fabric.api import run as frun
         from fabric.api import env
         from fabric.api import hide
         from fabric.network import disconnect_all
-
         env.host_string = ctx['master_name']
         env.user = 'hadoop'
         env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
@@ -351,29 +361,38 @@ def emr_newcluster(btn):
 
         # just in case https://jpetazzo.github.io/2015/01/13/docker-mount-dynamic-volumes/
         with hide('running'):
-            os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/home/hadoop'.format(**ctx))
-            # install jupyter
-            run("python3 -m pip install --quiet jupyter")
-            run("mkdir datasets")
-            run("aws s3 cp --quiet s3://dsa-titanic-dataset/titanic.csv datasets/titanic.csv")
-            run("aws s3 cp --quiet s3://amazon-cleaned-reviews/cleaned_reviews.json datasets/cleaned_reviews.json")
-            run("jupyter notebook --port 9443 --no-browser --ip 0.0.0.0")
+            def run(cmd, local=False):
+                (os.system if local else frun)(cmd.format(**ctx))
 
-            # # Transfer current working directory
-            # run('sudo mkdir /var/lib/jupyter/home/jovyan/.transfer_in && sudo chmod o+w /var/lib/jupyter/home/jovyan/.transfer_in')
-            # os.system('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:/var/lib/jupyter/home/jovyan/.transfer_in'.format(**ctx))
-            # # Sanitize and grant permissions
-            # run('sudo rm -f /var/lib/jupyter/home/jovyan/.transfer_in/{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}')
+            ctx['transfer_in'] = '/home/hadoop/.transfer_in'
+
+            # Install Jupyter and Spark finder
+            run('sudo pip-3.4 install jupyter findspark')
+            # Transfer current working directory
+            run('sudo mkdir {transfer_in} && sudo chmod o+w {transfer_in}')
+            run('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:{transfer_in}', local=True)
+            # Sanitize and grant permissions
+            run('sudo rm -f {transfer_in}/{{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}}')
             # run('sudo chown -R 1000:100 /var/lib/jupyter/home/jovyan/.transfer_in/*')
-            # # Pass through and mount EBS
+            # Pass through / mount EBS
             # run('sudo docker restart jupyterhub')
-            # run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
+            run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
+            run('mkdir workspace')
+            run('touch workspace/\'danger!!\'')
+            run('sudo mount /dev/xvdz /home/hadoop/workspace')
+            run('sudo chown hadoop:hadoop /home/hadoop/workspace')
             # run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
             # run('sudo docker exec jupyterhub touch /home/jovyan/workspace/\'danger!!\'')
             # run('sudo docker exec jupyterhub mount /dev/xvdz /home/jovyan/workspace')
             # run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
-            # # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
+            # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
             # run("sudo docker exec jupyterhub bash -c 'ls /home/jovyan/workspace/*.ipynb || cp -a /home/jovyan/.transfer_in/* /home/jovyan/workspace/'")
+            run("ls /home/hadoop/workspace/*.ipynb || cp -a /home/hadoop/.transfer_in/* /home/hadoop/workspace/")
+            # Launch Jupyter
+            run('mkdir .jupyter')
+            run('curl -o /home/hadoop/.jupyter/jupyter_notebook_config.py https://s3-us-west-2.amazonaws.com/dsa-mizzou/scripts/jupyter_notebook_config.py')
+            run('sudo yum -y install tmux')
+            run('tmux new-session -d "jupyter notebook --no-browser"')
 
         progress.value = 100
         progress.description = 'Done.'
@@ -477,7 +496,7 @@ def ui_emr_services(cluster_id=None):
         ctx = {k:v for k,v in ret}
         return HTML("""
         <p><strong>Log into your dedicated Jupyter from AWS EMR Cluster</strong></p>
-        <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="https://{master_name}:9443/" target="_blank">Jupyter Notebook</a>
+        <a class="jupyter-widgets jupyter-button widget-button mod-primary" href="http://{master_name}:9090/" target="_blank">Jupyter Notebook</a>
         <p>
           Chrome will suggest that the connection is not private, but it is. This appears this way because we are using self-signed cert that is not recognized by Cert Authorities.
           It is safe to proceed by clicking the "ADVANCED" link at the left bottom of the page and then the "Proceed to ...compute.amazonaws.com (unsafe)" link.
