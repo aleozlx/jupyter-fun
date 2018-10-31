@@ -350,7 +350,7 @@ def emr_newcluster(btn):
 
         #Bootstrap Cluster with Fabric
         from fabric import tasks
-        from fabric.api import run as frun
+        from fabric.api import run as frun, sudo
         from fabric.api import env
         from fabric.api import hide
         from fabric.network import disconnect_all
@@ -358,27 +358,27 @@ def emr_newcluster(btn):
         env.user = 'hadoop'
         env.key_filename = '{wk_dir}/{emr_pem_file}.pem'.format(**ctx)
         env.warn_only = True
-
+        progress.description = "Installing needed packages and loading datasets..."
         # just in case https://jpetazzo.github.io/2015/01/13/docker-mount-dynamic-volumes/
         with hide('running'):
             def run(cmd, local=False):
                 (os.system if local else frun)(cmd.format(**ctx))
 
-            ctx['transfer_in'] = '/home/hadoop/.transfer_in'
+            #ctx['transfer_in'] = '/home/hadoop/.transfer_in'
 
             # Install Jupyter and Spark finder
-            run('sudo pip-3.4 install jupyter findspark')
+            sudo('pip-3.4 install --quiet jupyter findspark sklearn pandas', quiet=True)
             # Transfer current working directory
-            run('sudo mkdir {transfer_in} && sudo chmod o+w {transfer_in}')
-            run('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:{transfer_in}', local=True)
+            #run('sudo mkdir {transfer_in} && sudo chmod o+w {transfer_in}')
+            #run('scp -o StrictHostKeyChecking=no -r -i {wk_dir}/{emr_pem_file}.pem {wk_dir}/* hadoop@{master_name}:{transfer_in}', local=True)
             # Sanitize and grant permissions
-            run('sudo rm -f {transfer_in}/{{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}}')
+            #run('sudo rm -f {transfer_in}/{{aws-emr-secrets.yml,aws-emr-config.yml,local.db,*.pem}}')
             # run('sudo chown -R 1000:100 /var/lib/jupyter/home/jovyan/.transfer_in/*')
             # Pass through / mount EBS
             # run('sudo docker restart jupyterhub')
             run('sudo file -s /dev/xvdz | grep -q ext4 || sudo mkfs.ext4 /dev/xvdz')
             run('mkdir workspace')
-            run('touch workspace/\'danger!!\'')
+            #run('touch workspace/\'danger!!\'')
             run('sudo mount /dev/xvdz /home/hadoop/workspace')
             run('sudo chown hadoop:hadoop /home/hadoop/workspace')
             # run('sudo docker exec jupyterhub mkdir /home/jovyan/workspace')
@@ -387,13 +387,21 @@ def emr_newcluster(btn):
             # run('sudo docker exec jupyterhub chown jovyan:users /home/jovyan/workspace')
             # Be careful writing into EBS! We can NOT reliably tell if anything is newer or older here than those of DSA systems, without version control.
             # run("sudo docker exec jupyterhub bash -c 'ls /home/jovyan/workspace/*.ipynb || cp -a /home/jovyan/.transfer_in/* /home/jovyan/workspace/'")
-            run("ls /home/hadoop/workspace/*.ipynb || cp -a /home/hadoop/.transfer_in/* /home/hadoop/workspace/")
+            #run("ls /home/hadoop/workspace/*.ipynb || cp -a /home/hadoop/.transfer_in/* /home/hadoop/workspace/")
             # Launch Jupyter
             run('mkdir .jupyter')
-            run('curl -o /home/hadoop/.jupyter/jupyter_notebook_config.py https://s3-us-west-2.amazonaws.com/dsa-mizzou/scripts/jupyter_notebook_config.py')
-            run('sudo yum -y install tmux')
+            run('curl -o /home/hadoop/.jupyter/jupyter_notebook_config.py https://s3-us-west-2.amazonaws.com/dsa-mizzou/scripts/jupyter_notebook_config.py', quiet=True)
+            sudo('yum -y install tmux', quiet=True)
             run('tmux new-session -d "jupyter notebook --no-browser"')
-
+            sudo("yum -y install git", quiet=True)
+            run("mkdir /tmp/datasets")
+            run("aws s3 cp --quiet s3://amazon-cleaned-reviews/cleaned_reviews_10k.json /tmp/datasets/amazon_reviews.json")
+            run("aws s3 cp --quiet s3://dsa-titanic-dataset/titanic.csv /tmp/datasets/titanic.csv")
+            run("hdfs dfs -mkdir /datasets")
+            run("hdfs dfs -moveFromLocal /tmp/datasets/amazon_reviews.json hdfs:///datasets/amazon_reviews.json")
+            run("hdfs dfs -moveFromLocal /tmp/datasets/titanic.csv hdfs:///datasets/titanic.csv")
+            run("rm -rf /tmp/datasets")
+            
         progress.value = 100
         progress.description = 'Done.'
         print('Everything is ready!')
